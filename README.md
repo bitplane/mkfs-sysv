@@ -1,0 +1,47 @@
+# mkfs-sysv
+
+Create SVR4 (System V) filesystem images in Rust.
+
+The on-disk format matches Linux's `sysv_fs.h` (SVR4 variant), so images
+can be mounted with the kernel `sysv` module.
+
+## Install
+
+From crates.io:
+
+```bash
+cargo install mkfs-sysv
+```
+
+This installs a binary called `mkfs-sysv`. Pre-built binaries for Linux
+(x86_64 / aarch64), macOS (universal), and Windows are also attached to
+each [GitHub release][releases].
+
+[releases]: https://github.com/bitplane/mkfs-sysv/releases
+
+## Usage
+
+```bash
+# Create an empty 4 MB image.
+mkfs-sysv out.sysv 4
+
+# Populate from a directory tree (recursive — subdirectories are preserved).
+mkfs-sysv -d ./payload out.sysv 4
+
+# Mount on Linux.
+sudo mount -o loop,ro -t sysv out.sysv /mnt
+```
+
+## Limits
+
+This is a "test image" mkfs:
+
+- 256 inodes total (fixed by layout: 32 inode blocks × 8 inodes/block).
+- 14-byte filenames; longer names are truncated.
+- Files use direct-only block addressing (10 zone pointers), so the
+  largest file is 10 × 512 = 5 KB.
+- Same upper bound applies to directory listings (~320 entries).
+
+## License
+
+WTFPL with one extra clause: don't blame me. See [LICENSE](LICENSE).
