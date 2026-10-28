@@ -174,14 +174,13 @@ impl Sysv {
             let entry = entry?;
             let path = entry.path();
             let meta = fs::symlink_metadata(&path)?;
+            if !meta.is_file() && !meta.is_dir() {
+                anyhow::bail!("unsupported file type: {}", path.display());
+            }
             let raw_name = entry.file_name();
             let name = raw_name
                 .to_str()
                 .ok_or_else(|| anyhow::anyhow!("non-UTF8 filename: {:?}", raw_name))?;
-
-            if !meta.is_file() && !meta.is_dir() {
-                continue;
-            }
 
             let child_ino = self.alloc_inode()?;
             let (perm, uid, gid) = perm_uid_gid(&meta)
@@ -559,6 +558,24 @@ mod tests {
                 (expected_type | mode) as u16
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unsupported_entries_are_rejected_with_paths() {
+        use std::os::unix::{fs::symlink, net::UnixListener};
+        let src = TempDir::new().unwrap();
+        let link = src.path().join("dangling");
+        symlink("missing", &link).unwrap();
+        let err = Sysv::new(1).unwrap().populate_root(src.path()).unwrap_err();
+        assert!(err.to_string().contains("unsupported file type"));
+        assert!(err.to_string().contains(&link.display().to_string()));
+        fs::remove_file(link).unwrap();
+        let socket = src.path().join("socket");
+        let _listener = UnixListener::bind(&socket).unwrap();
+        let err = Sysv::new(1).unwrap().populate_root(src.path()).unwrap_err();
+        assert!(err.to_string().contains("unsupported file type"));
+        assert!(err.to_string().contains(&socket.display().to_string()));
     }
 
     #[test]

@@ -36,6 +36,8 @@ sudo mount -o loop,ro -t sysv out.sysv /mnt
 
 This is a "test image" mkfs:
 
+- Population accepts regular files and directories; symlinks and special files
+  are rejected with an error. Unix ownership IDs must fit in 16 bits.
 - 256 inodes total (fixed by layout: 32 inode blocks × 8 inodes/block).
 - 14-byte filenames; longer names are truncated.
 - Files use direct-only block addressing (10 zone pointers), so the
