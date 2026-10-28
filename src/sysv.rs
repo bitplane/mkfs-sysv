@@ -171,10 +171,14 @@ impl Sysv {
     }
 
     fn populate_dir(&mut self, dir_ino: u32, src_path: &Path) -> anyhow::Result<()> {
-        for entry in fs::read_dir(src_path)? {
-            let entry = entry?;
+        let entries = fs::read_dir(src_path)
+            .with_context(|| format!("reading directory {}", src_path.display()))?;
+        for entry in entries {
+            let entry =
+                entry.with_context(|| format!("reading entry in {}", src_path.display()))?;
             let path = entry.path();
-            let meta = fs::symlink_metadata(&path)?;
+            let meta = fs::symlink_metadata(&path)
+                .with_context(|| format!("reading metadata for {}", path.display()))?;
             if !meta.is_file() && !meta.is_dir() {
                 anyhow::bail!("unsupported file type: {}", path.display());
             }
@@ -223,7 +227,8 @@ impl Sysv {
 
     fn write_file_data(&mut self, ino: u32, path: &Path) -> anyhow::Result<()> {
         let mut data = Vec::new();
-        File::open(path)?
+        File::open(path)
+            .with_context(|| format!("opening {}", path.display()))?
             .take((MAX_FILE_SIZE + 1) as u64)
             .read_to_end(&mut data)
             .with_context(|| format!("reading {}", path.display()))?;
@@ -353,9 +358,12 @@ impl Sysv {
         );
         self.write_inode_table();
 
-        let mut f = File::create(path)?;
-        f.write_all(&self.image)?;
-        f.sync_all()?;
+        let mut f =
+            File::create(path).with_context(|| format!("creating image {}", path.display()))?;
+        f.write_all(&self.image)
+            .with_context(|| format!("writing image {}", path.display()))?;
+        f.sync_all()
+            .with_context(|| format!("syncing image {}", path.display()))?;
 
         Ok(Stats {
             total_blocks: self.total_blocks,
@@ -607,6 +615,23 @@ mod tests {
                 assert_eq!(sysv.next_block, initial_block);
             }
         }
+    }
+
+    #[test]
+    fn io_errors_identify_the_failed_path() {
+        let dir = TempDir::new().unwrap();
+        let missing = dir.path().join("missing");
+        let mut sysv = Sysv::new(1).unwrap();
+        let err = sysv.populate_root(&missing).unwrap_err();
+        assert!(err.to_string().contains(&missing.display().to_string()));
+        assert!(err
+            .chain()
+            .any(|cause| cause.downcast_ref::<std::io::Error>().is_some()));
+        let err = sysv.write_file_data(ROOT_INO, &missing).unwrap_err();
+        assert!(err.to_string().contains(&missing.display().to_string()));
+        let output = missing.join("out.sysv");
+        let err = sysv.write_to(&output).err().unwrap();
+        assert!(err.to_string().contains(&output.display().to_string()));
     }
 
     #[test]
