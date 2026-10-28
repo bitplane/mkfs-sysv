@@ -42,6 +42,11 @@ This is a "test image" mkfs:
 
 - Population accepts regular files and directories; symlinks and special files
   are rejected with an error. Unix ownership IDs must fit in 16 bits.
+- The image root always has mode `0755`, UID 0, and GID 0. `-d` copies the
+  source directory's contents, not the source directory's own metadata.
+  On Unix, child entries preserve ownership and permission bits (including
+  sticky, setuid, and setgid). On other platforms, files use `0644`, directories
+  use `0755`, and ownership is UID/GID 0.
 - 256 inodes total (fixed by layout: 32 inode blocks × 8 inodes/block).
 - 14-byte filenames; longer names are truncated.
 - Files use direct-only block addressing (10 zone pointers), so the
