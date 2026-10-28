@@ -48,10 +48,17 @@ This is a "test image" mkfs:
   sticky, setuid, and setgid). On other platforms, files use `0644`, directories
   use `0755`, and ownership is UID/GID 0.
 - 256 inodes total (fixed by layout: 32 inode blocks × 8 inodes/block).
-- 14-byte filenames; longer names are truncated.
+  Two are reserved (bad-block inode and root), leaving 254 files and
+  subdirectories across the entire image.
+- Source filenames must be UTF-8. Names longer than 14 bytes are truncated
+  by bytes, which can split a multibyte character. Names that collide after
+  truncation in the same directory are rejected.
+- All timestamps use image creation time, not source timestamps.
 - Files use direct-only block addressing (10 zone pointers), so the
   largest file is 10 × 512 = 5 KB.
-- Same upper bound applies to directory listings (~320 entries).
+- Directory data also has a 5 KB limit (320 entries including `.` and `..`),
+  but the global inode limit restricts populated directories to at most
+  254 child entries.
 
 ## License
 
