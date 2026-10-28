@@ -496,7 +496,7 @@ fn checked_owner(uid: u32, gid: u32) -> anyhow::Result<(u16, u16)> {
 fn perm_uid_gid(meta: &fs::Metadata) -> anyhow::Result<(u16, u16, u16)> {
     use std::os::unix::fs::MetadataExt;
     let (uid, gid) = checked_owner(meta.uid(), meta.gid())?;
-    Ok(((meta.mode() & 0o777) as u16, uid, gid))
+    Ok(((meta.mode() & 0o7777) as u16, uid, gid))
 }
 
 #[cfg(not(unix))]
@@ -532,6 +532,33 @@ mod tests {
             .to_string()
             .contains("GID 65536"));
         assert!(checked_owner(u32::MAX, 0).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn special_permissions_survive_serialization() {
+        use std::os::unix::fs::PermissionsExt;
+        for (is_dir, mode) in [(true, 0o1777), (true, 0o2775), (false, 0o4755)] {
+            let src = TempDir::new().unwrap();
+            let path = src.path().join("entry");
+            if is_dir {
+                fs::create_dir(&path).unwrap();
+            } else {
+                File::create(&path).unwrap();
+            }
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            let dst = TempDir::new().unwrap();
+            let image = dst.path().join("image");
+            let mut sysv = Sysv::new(1).unwrap();
+            sysv.populate_root(src.path()).unwrap();
+            sysv.write_to(&image).unwrap();
+            let bytes = fs::read(image).unwrap();
+            let expected_type = if is_dir { S_IFDIR } else { S_IFREG };
+            assert_eq!(
+                read_u16_le(&bytes, 1024 + 2 * 64),
+                (expected_type | mode) as u16
+            );
+        }
     }
 
     #[test]
