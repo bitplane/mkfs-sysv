@@ -15,6 +15,7 @@
 //! scheme: each chain block holds up to 50 zone numbers plus a pointer
 //! to the previous chain block.
 
+use anyhow::Context;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::Path;
@@ -183,7 +184,8 @@ impl Sysv {
             }
 
             let child_ino = self.alloc_inode()?;
-            let (perm, uid, gid) = perm_uid_gid(&meta);
+            let (perm, uid, gid) = perm_uid_gid(&meta)
+                .with_context(|| format!("invalid metadata for {}", path.display()))?;
             {
                 let child = &mut self.inodes[(child_ino - 1) as usize];
                 child.uid = uid;
@@ -484,19 +486,23 @@ impl Sysv {
 }
 
 #[cfg(unix)]
-fn perm_uid_gid(meta: &fs::Metadata) -> (u16, u16, u16) {
+fn checked_owner(uid: u32, gid: u32) -> anyhow::Result<(u16, u16)> {
+    let uid = u16::try_from(uid).with_context(|| format!("UID {uid} exceeds 65535"))?;
+    let gid = u16::try_from(gid).with_context(|| format!("GID {gid} exceeds 65535"))?;
+    Ok((uid, gid))
+}
+
+#[cfg(unix)]
+fn perm_uid_gid(meta: &fs::Metadata) -> anyhow::Result<(u16, u16, u16)> {
     use std::os::unix::fs::MetadataExt;
-    (
-        (meta.mode() & 0o777) as u16,
-        meta.uid() as u16,
-        meta.gid() as u16,
-    )
+    let (uid, gid) = checked_owner(meta.uid(), meta.gid())?;
+    Ok(((meta.mode() & 0o777) as u16, uid, gid))
 }
 
 #[cfg(not(unix))]
-fn perm_uid_gid(meta: &fs::Metadata) -> (u16, u16, u16) {
+fn perm_uid_gid(meta: &fs::Metadata) -> anyhow::Result<(u16, u16, u16)> {
     let perm = if meta.is_dir() { 0o755 } else { 0o644 };
-    (perm, 0, 0)
+    Ok((perm, 0, 0))
 }
 
 #[cfg(test)]
@@ -510,6 +516,22 @@ mod tests {
     }
     fn read_u32_le(buf: &[u8], off: usize) -> u32 {
         u32::from_le_bytes(buf[off..off + 4].try_into().unwrap())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ownership_must_fit_on_disk() {
+        assert_eq!(checked_owner(0, 65535).unwrap(), (0, 65535));
+        assert_eq!(checked_owner(65535, 0).unwrap(), (65535, 0));
+        assert!(checked_owner(65536, 0)
+            .unwrap_err()
+            .to_string()
+            .contains("UID 65536"));
+        assert!(checked_owner(0, 65536)
+            .unwrap_err()
+            .to_string()
+            .contains("GID 65536"));
+        assert!(checked_owner(u32::MAX, 0).is_err());
     }
 
     #[test]
