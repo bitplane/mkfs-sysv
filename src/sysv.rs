@@ -29,6 +29,7 @@ const BADBL_INO: u32 = 1;
 const ROOT_INO: u32 = 2;
 const NAMELEN: usize = 14;
 const DIRECT_BLOCKS: usize = 10;
+const MAX_FILE_SIZE: usize = DIRECT_BLOCKS * BLOCK_SIZE;
 const INODE_BLOCKS: usize = 32;
 const INODE_SIZE: usize = 64;
 const DIRENT_SIZE: usize = 16;
@@ -222,9 +223,17 @@ impl Sysv {
 
     fn write_file_data(&mut self, ino: u32, path: &Path) -> anyhow::Result<()> {
         let mut data = Vec::new();
-        File::open(path)?.read_to_end(&mut data)?;
-        let size = u32::try_from(data.len())
-            .map_err(|_| anyhow::anyhow!("file exceeds 4 GB: {}", path.display()))?;
+        File::open(path)?
+            .take((MAX_FILE_SIZE + 1) as u64)
+            .read_to_end(&mut data)
+            .with_context(|| format!("reading {}", path.display()))?;
+        if data.len() > MAX_FILE_SIZE {
+            anyhow::bail!(
+                "file exceeds {MAX_FILE_SIZE}-byte limit: {}",
+                path.display()
+            );
+        }
+        let size = data.len() as u32;
         self.inodes[(ino - 1) as usize].size = size;
 
         for (file_block, chunk) in data.chunks(BLOCK_SIZE).enumerate() {
@@ -576,6 +585,28 @@ mod tests {
         let err = Sysv::new(1).unwrap().populate_root(src.path()).unwrap_err();
         assert!(err.to_string().contains("unsupported file type"));
         assert!(err.to_string().contains(&socket.display().to_string()));
+    }
+
+    #[test]
+    fn file_size_limit_is_checked_before_allocating_blocks() {
+        let src = TempDir::new().unwrap();
+        let path = src.path().join("payload");
+        for size in [0, 1, 511, 512, 513, 5120, 5121, 32 * 1024 * 1024] {
+            File::create(&path).unwrap().set_len(size).unwrap();
+            let mut sysv = Sysv::new(1).unwrap();
+            let initial_block = sysv.next_block;
+            let result = sysv.populate_root(src.path());
+            if size <= 5120 {
+                result.unwrap();
+                assert_eq!(sysv.inodes[2].size, size as u32);
+                assert_eq!(sysv.next_block - initial_block, size.div_ceil(512) as u32);
+            } else {
+                let err = result.unwrap_err().to_string();
+                assert!(err.contains("5120-byte limit"));
+                assert!(err.contains(&path.display().to_string()));
+                assert_eq!(sysv.next_block, initial_block);
+            }
+        }
     }
 
     #[test]
