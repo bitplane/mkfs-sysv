@@ -2,8 +2,12 @@
 
 Create SVR4 (System V) filesystem images in Rust.
 
-The on-disk format matches Linux's `sysv_fs.h` (SVR4 variant), so images
-can be mounted with the kernel `sysv` module.
+The on-disk format matches Linux's historical `sysv_fs.h` (SVR4 variant).
+Mounting requires a kernel with SysV filesystem support enabled, such as
+Linux 6.12 with `CONFIG_SYSV_FS`. Mainline Linux [removed the driver][sysv-removal]
+in 6.15; the mount command below will not work on newer mainline kernels.
+
+[sysv-removal]: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=aaca83f7b13fbe54c853f63eca9e849e6b441459
 
 ## Install
 
@@ -28,7 +32,7 @@ mkfs-sysv out.sysv 4
 # Populate from a directory tree (recursive — subdirectories are preserved).
 mkfs-sysv -d ./payload out.sysv 4
 
-# Mount on Linux.
+# Mount on a Linux kernel with SysV support (see above).
 sudo mount -o loop,ro -t sysv out.sysv /mnt
 ```
 
